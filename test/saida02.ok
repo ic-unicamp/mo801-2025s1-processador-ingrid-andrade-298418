@@ -1,0 +1,7 @@
+*** Starting simulation. ***
+M[0x00001000] <- 0xaaaa5555
+x1 = 00001000
+x2 = 00000000
+x3 = 00000005
+pc = 0000001c
+M[0x00000800] <- 0xdeadbeef
