@@ -28,7 +28,7 @@ module core(
   input  [31:0] data_in     // Dado lido da memória
 );
 
-  // --- Estados da Máquina de Estados ---
+  // --- Estados
   // FETCH= 4'b0000; 
   // DECODE = 4'b0001
   // EXECUTE_R = 4'b0010
