@@ -41,11 +41,10 @@ module core(
 
   reg [3:0] state, next_state; // Registradores de Estado
 
-  // === Registradores ===
+  // === Registradores
   reg [31:0] pc;             // Program Counter
   reg [31:0] registers[0:31]; // Banco de Registradores
 
-  // --- Registradores de Pipeline / Intermediários ---
   reg [31:0] instruction;    // Instrução atual (saída do Fetch)
   reg [31:0] read_data1;     // Valor lido de rs1 (saída do Decode)
   reg [31:0] read_data2;     // Valor lido de rs2 (saída do Decode)
@@ -103,7 +102,7 @@ module core(
     .result(alu_out) // Conecta à saída wire da ALU
   );
 
-  // --- Lógica Combinacional (Unidade de Controle + Muxes Datapath + Saídas) ---
+  // == Unidade de controle
   always @(*) begin
     // Valores Padrão para Sinais de Controle
     PCWrite      = 1'b0;
@@ -117,7 +116,7 @@ module core(
     MemToReg     = 1'b0;  // Default: ALU Result
     next_state   = state; // Default: fica no mesmo estado
 
-    // --- Lógica da Unidade de Controle + Próximo Estado ---
+    // == Próximo estado
     case (state)
       4'b0000: begin // FETCH
         IRWrite    = 1'b1;
@@ -208,9 +207,7 @@ module core(
       end
     endcase
 
-    // --- Lógica Combinacional do Datapath (Muxes) ---
-
-    // Seleção do Imediato
+    // Seleção do imediato
      case (opcode)
         7'b0010011: imm_comb = imm_i; // I-type ALU
         7'b0000011: imm_comb = imm_i; // LW
@@ -218,10 +215,10 @@ module core(
         default:    imm_comb = 32'b0;
      endcase
 
-    // Mux Entrada A da ALU
+    // Entrada da ALU A
     alu_in_a = (ALUSrcA == 2'b00) ? pc : read_data1;
 
-    // Mux Entrada B da ALU
+    // B
     case (ALUSrcB)
       2'b00:  alu_in_b = read_data2;
       2'b01:  alu_in_b = imm_reg;
@@ -229,35 +226,29 @@ module core(
       default: alu_in_b = 32'b0;
     endcase
 
-    // Mux Seleção Próximo PC
     pc_next = pc_plus_4;
 
-    // Mux Seleção Dado Write Back
     write_back_data = (MemToReg == 1'b1) ? mem_data_reg : alu_result_reg;
 
-    // --- Geração das Saídas Combinacionais ---
     address_reg = (AdrSrc == 1'b1) ? alu_result_reg : pc;
     we_reg = MemWrite;
     data_out_reg = read_data2;
 
   end // Fim do always @(*)
 
-  // --- Atribuições Contínuas para Saídas do Módulo ---
   assign address = address_reg;
   assign we = we_reg;
   assign data_out = data_out_reg;
 
-  // --- Lógica Sequencial (Atualização de Registradores) ---
+  // == atualização de registrador
   always @(posedge clk or negedge resetn) begin
     if (!resetn) begin
-      // Reset assíncrono
       pc <= 32'b0;
       state <= 4'b0000; // FETCH (Literal)
       // Zera registradores do banco
       for (i = 0; i < 32; i = i + 1) begin
         registers[i] <= 32'b0;
       end
-       // Zera regs de pipeline
        instruction <= 32'b0;
        read_data1 <= 32'b0;
        read_data2 <= 32'b0;
@@ -267,7 +258,6 @@ module core(
        rd_reg <= 5'b0;
 
     end else begin
-      // Atualizações síncronas
 
       // Atualiza Estado
       state <= next_state;
@@ -277,12 +267,10 @@ module core(
         pc <= pc_next;
       end
 
-      // Atualiza Registrador de Instrução
       if (IRWrite) begin
         instruction <= data_in;
       end
 
-      // Atualiza Registradores de Pipeline (no final do ciclo DECODE)
       if (state == 4'b0001) begin // DECODE (Literal)
          read_data1 <= registers[rs1];
          read_data2 <= registers[rs2];
@@ -290,17 +278,15 @@ module core(
          rd_reg     <= rd;
       end
 
-      // Atualiza Registrador de Resultado da ALU (no final da EXECUTE/MEM_ADDR_CALC)
+      // Atualiza resutltado  da ALU (no final da EXECUTE/MEM_ADDR_CALC)
       if (state == 4'b0010 || state == 4'b0011 || state == 4'b0100) begin // EXECUTE_R, EXECUTE_I, MEM_ADDR_CALC (Literais)
          alu_result_reg <= alu_out;
       end
 
-      // Atualiza Registrador de Dado da Memória (no final do MEM_READ)
        if (state == 4'b0101) begin // MEM_READ (Literal)
          mem_data_reg <= data_in;
        end
 
-      // Escreve no Banco de Registradores (no final do WB_REG/WB_MEM)
       if (RegWrite && rd_reg != 5'b0) begin
         registers[rd_reg] <= write_back_data;
       end
