@@ -22,33 +22,35 @@ endmodule
 module core(
   input        clk,
   input        resetn,
-  output       we,         // Write Enable para memória
+  output       we,         // Write Enable para memória (indicando se o processador quer escrever)
   output [31:0] address,    // Endereço para memória
   output [31:0] data_out,   // Dado a ser escrito na memória
-  input  [31:0] data_in     // Dado lido da memória
+  input  [31:0] data_in     // Dado lido da memória (resposta que pode ser um dado, ou uma instrução, depende do ciclo)
 );
 
-  // --- Estados
-  // FETCH= 4'b0000; 
-  // DECODE = 4'b0001
-  // EXECUTE_R = 4'b0010
-  // EXECUTE_I = 4'b0011
-  // MEM_ADDR_CALC = 4'b0100
-  // MEM_READ = 4'b0101
-  // MEM_WRITE = 4'b0110
-  // WB_REG = 4'b0111
-  // WB_MEM = 4'b1000
+  // --- Estados da Máquina de estados ---
+  // Os estados são representados por 4 bits, onde cada bit representa um estado
 
-  reg [3:0] state, next_state; // Registradores de Estado
+  // FETCH= 4'b0000; // 0
+  // DECODE = 4'b0001 // 1
+  // EXECUTE_R = 4'b0010 // 2
+  // EXECUTE_I = 4'b0011 // 3
+  // MEM_ADDR_CALC = 4'b0100 // 4
+  // MEM_READ = 4'b0101 // 5
+  // MEM_WRITE = 4'b0110 // 6
+  // WB_REG = 4'b0111 // 7
+  // WB_MEM = 4'b1000 // 8
 
-  // === Registradores
+  reg [3:0] state, next_state; // Guardar estado atual e próximo estado da máquina de estados
+
+  // === Todos os registradores
   reg [31:0] pc;             // Program Counter
   reg [31:0] registers[0:31]; // Banco de Registradores
 
   reg [31:0] instruction;    // Instrução atual (saída do Fetch)
   reg [31:0] read_data1;     // Valor lido de rs1 (saída do Decode)
   reg [31:0] read_data2;     // Valor lido de rs2 (saída do Decode)
-  reg [31:0] imm_reg;        // Imediato estendido (saída do Decode)
+  reg [31:0] imm_reg;        // Imediato (saída do Decode)
   reg [31:0] alu_result_reg; // Resultado da ALU (saída da Execução/AddrCalc)
   reg [31:0] mem_data_reg;   // Dado lido da memória (saída do MemRead)
   reg [4:0] rd_reg;          // Registrador destino (saída do Decode)
@@ -69,7 +71,7 @@ module core(
   reg [1:0]  ALUSrcA;     // Seleciona entrada A da ALU (00=PC, 01=Reg[rs1])
   reg [1:0]  ALUSrcB;     // Seleciona entrada B da ALU (00=Reg[rs2], 01=Imm, 10=Const 4)
   reg [3:0]  ALUControl;  // Código da operação para a ALU
-  reg        AdrSrc;      // Seleciona fonte do endereço (0=PC, 1=ALUOut)
+  reg        AdrSrc;      // Seleciona de onde vem o endereço (0=PC, 1=ALU)
   reg [0:0]  MemToReg;    // Seleciona dado do Write Back (0=ALU, 1=Mem)
 
   // === Datapath ===
@@ -119,7 +121,7 @@ module core(
     // == Próximo estado
     case (state)
       4'b0000: begin // FETCH
-        IRWrite    = 1'b1;
+        IRWrite    = 1'b1; // vai armazenar a instrução recebida
         AdrSrc     = 1'b0; // Endereço = PC
         next_state = 4'b0001; // -> DECODE
       end
@@ -236,13 +238,13 @@ module core(
 
   end // Fim do always @(*)
 
-  assign address = address_reg;
+  assign address = address_reg; // Saída do adress é conectada ao valor interno de adress_reg. Pode conter o PC ou a saida da ALU
   assign we = we_reg;
   assign data_out = data_out_reg;
 
   // == atualização de registrador
   always @(posedge clk or negedge resetn) begin
-    if (!resetn) begin
+    if (!resetn) begin // volta para o estado FETCH se resetar
       pc <= 32'b0;
       state <= 4'b0000; // FETCH (Literal)
       // Zera registradores do banco
@@ -260,7 +262,7 @@ module core(
     end else begin
 
       // Atualiza Estado
-      state <= next_state;
+      state <= next_state; // atualiza o estado a cada pulso de clock
 
       // Atualiza PC
       if (PCWrite) begin
@@ -268,7 +270,7 @@ module core(
       end
 
       if (IRWrite) begin
-        instruction <= data_in;
+        instruction <= data_in; // Memória de instruções
       end
 
       if (state == 4'b0001) begin // DECODE (Literal)
