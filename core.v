@@ -1,9 +1,9 @@
 // == Módulo da ALU
 module alu(
-  input [31:0] a, // Operandos sobre o qual a ALU vai executar
-  input [31:0] b, // Qual operação (4 bits)
-  input [3:0] alu_control, // 0000:add, 0001:sub, 0010:and, 0011:or, 0100:xor
-  output reg [31:0] result
+  input [31:0] a, // Operando A
+  input [31:0] b, // Operando B
+  input [3:0] alu_control, // Código de controle da operação ALU
+  output reg [31:0] result // Resultado da operação
 );
   always @(*) begin
     case (alu_control)
@@ -12,50 +12,38 @@ module alu(
       4'b0010: result = a & b; // AND bit a bit
       4'b0011: result = a | b; // OR bit a bit
       4'b0100: result = a ^ b; // XOR bit a bit
-      default: result = 32'b0; // Operação inválida -> resultado 0
+      default: result = 32'b0; // Operação inválida
     endcase
   end
 endmodule
 
-// == Módulo do core
-
+// == Módulo do processador principal (core)
 module core(
-  input        clk,
-  input        resetn,
-  output       we,         // Write Enable para memória (indicando se o processador quer escrever)
-  output [31:0] address,    // Endereço para memória
-  output [31:0] data_out,   // Dado a ser escrito na memória
-  input  [31:0] data_in     // Dado lido da memória (resposta que pode ser um dado, ou uma instrução, depende do ciclo)
+  input        clk,           // Clock
+  input        resetn,        // Reset ativo em 0
+  output       we,            // Sinal de escrita na memória
+  output [31:0] address,      // Endereço de acesso à memória
+  output [31:0] data_out,     // Dados a serem escritos na memória
+  input  [31:0] data_in       // Dados lidos da memória
 );
 
-  // --- Estados da Máquina de estados ---
-  // Os estados são representados por 4 bits, onde cada bit representa um estado
+  // Máquina de estados
+  reg [3:0] state, next_state;
 
-  // FETCH= 4'b0000; // 0
-  // DECODE = 4'b0001 // 1
-  // EXECUTE_R = 4'b0010 // 2
-  // EXECUTE_I = 4'b0011 // 3
-  // MEM_ADDR_CALC = 4'b0100 // 4
-  // MEM_READ = 4'b0101 // 5
-  // MEM_WRITE = 4'b0110 // 6
-  // WB_REG = 4'b0111 // 7
-  // WB_MEM = 4'b1000 // 8
+  // Registrador de programa (PC) e banco de registradores
+  reg [31:0] pc;
+  reg [31:0] registers[0:31];
 
-  reg [3:0] state, next_state; // Guardar estado atual e próximo estado da máquina de estados
+  // Registradores auxiliares
+  reg [31:0] instruction;
+  reg [31:0] read_data1;
+  reg [31:0] read_data2;
+  reg [31:0] imm_reg;
+  reg [31:0] alu_result_reg;
+  reg [31:0] mem_data_reg;
+  reg [4:0]  rd_reg; // Registrador destino
 
-  // === Todos os registradores
-  reg [31:0] pc;             // Program Counter
-  reg [31:0] registers[0:31]; // Banco de Registradores
-
-  reg [31:0] instruction;    // Instrução atual (saída do Fetch)
-  reg [31:0] read_data1;     // Valor lido de rs1 (saída do Decode)
-  reg [31:0] read_data2;     // Valor lido de rs2 (saída do Decode)
-  reg [31:0] imm_reg;        // Imediato (saída do Decode)
-  reg [31:0] alu_result_reg; // Resultado da ALU (saída da Execução/AddrCalc)
-  reg [31:0] mem_data_reg;   // Dado lido da memória (saída do MemRead)
-  reg [4:0] rd_reg;          // Registrador destino (saída do Decode)
-
-  // === Decoders ===
+  // Campos da instrução
   wire [6:0] opcode = instruction[6:0];
   wire [4:0] rd     = instruction[11:7];
   wire [2:0] funct3 = instruction[14:12];
@@ -63,244 +51,245 @@ module core(
   wire [4:0] rs2    = instruction[24:20];
   wire [6:0] funct7 = instruction[31:25];
 
-  // === Sinais de controle ===
-  reg        PCWrite;     // Habilita escrita no PC
-  reg        IRWrite;     // Habilita escrita no reg. de instrução
-  reg        RegWrite;    // Habilita escrita no banco de registradores
-  reg        MemWrite;    // Habilita escrita na memória de dados (= 'we' output)
-  reg [1:0]  ALUSrcA;     // Seleciona entrada A da ALU (00=PC, 01=Reg[rs1])
-  reg [1:0]  ALUSrcB;     // Seleciona entrada B da ALU (00=Reg[rs2], 01=Imm, 10=Const 4)
-  reg [3:0]  ALUControl;  // Código da operação para a ALU
-  reg        AdrSrc;      // Seleciona de onde vem o endereço (0=PC, 1=ALU)
-  reg [0:0]  MemToReg;    // Seleciona dado do Write Back (0=ALU, 1=Mem)
+  // Sinais de controle
+  reg        PCWrite;
+  reg        IRWrite;
+  reg        RegWrite;
+  reg        MemWrite;
+  reg [1:0]  ALUSrcA;
+  reg [1:0]  ALUSrcB;
+  reg [3:0]  ALUControl;
+  reg        AdrSrc;
+  reg [0:0]  MemToReg;
 
-  // === Datapath ===
-  wire [31:0] imm_i = {{20{instruction[31]}}, instruction[31:20]}; // I-type immediate
-  wire [31:0] imm_s = {{20{instruction[31]}}, instruction[31:25], instruction[11:7]}; // S-type immediate
+  // Imediatos
+  wire [31:0] imm_i = {{20{instruction[31]}}, instruction[31:20]};
+  wire [31:0] imm_s = {{20{instruction[31]}}, instruction[31:25], instruction[11:7]};
+  wire [31:0] imm_j = {{12{instruction[31]}}, instruction[19:12], instruction[20], instruction[30:21], 1'b0};
+  wire [31:0] imm_u = {instruction[31:12], 12'b0};
+
+  // PC + 4
   wire [31:0] pc_plus_4 = pc + 4;
-  wire [31:0] alu_out;       // Saída da ALU (wire)
+  wire [31:0] alu_out;
 
-  // Regs de saída combinacional
-  reg [31:0] imm_comb;        // Imediato selecionado
-  reg [31:0] pc_next;         // Próximo valor do PC (saída do Mux PC)
-  reg [31:0] alu_in_a;        // Entrada A da ALU (saída do Mux A)
-  reg [31:0] alu_in_b;        // Entrada B da ALU (saída do Mux B)
-  reg [31:0] write_back_data; // Dado a ser escrito no registrador (saída do Mux WB)
+  // Registradores auxiliares combinacionais
+  reg [31:0] imm_comb;
+  reg [31:0] pc_next;
+  reg [31:0] alu_in_a;
+  reg [31:0] alu_in_b;
+  reg [31:0] write_back_data;
 
-  // Regs internos para direcionar saídas
+  // Saídas da memória
   reg        we_reg;
   reg [31:0] address_reg;
   reg [31:0] data_out_reg;
 
-  // == Variáveis ==
-  integer i; // Para loop no reset
-  integer k; // Para o loop initial
+  integer i;
+  integer k;
 
   // Instância da ALU
   alu alu_inst (
     .a(alu_in_a),
     .b(alu_in_b),
     .alu_control(ALUControl),
-    .result(alu_out) // Conecta à saída wire da ALU
+    .result(alu_out)
   );
 
-  // == Unidade de controle
+  // Lógica combinacional de controle e datapath
   always @(*) begin
-    // Valores Padrão para Sinais de Controle
+    // Sinais padrão
     PCWrite      = 1'b0;
     IRWrite      = 1'b0;
     RegWrite     = 1'b0;
     MemWrite     = 1'b0;
-    ALUSrcA      = 2'b01; // Default: Reg[rs1]
-    ALUSrcB      = 2'b00; // Default: Reg[rs2]
-    ALUControl   = 4'b0000; // Default: ADD
-    AdrSrc       = 1'b0;  // Default: PC
-    MemToReg     = 1'b0;  // Default: ALU Result
-    next_state   = state; // Default: fica no mesmo estado
+    ALUSrcA      = 2'b01;
+    ALUSrcB      = 2'b00;
+    ALUControl   = 4'b0000;
+    AdrSrc       = 1'b0;
+    MemToReg     = 1'b0;
+    next_state   = state;
 
-    // == Próximo estado
+    // Máquina de estados
     case (state)
       4'b0000: begin // FETCH
-        IRWrite    = 1'b1; // vai armazenar a instrução recebida
-        AdrSrc     = 1'b0; // Endereço = PC
-        next_state = 4'b0001; // -> DECODE
+        IRWrite    = 1'b1;
+        AdrSrc     = 1'b0;
+        next_state = 4'b0001;
       end
 
       4'b0001: begin // DECODE
-        // Determina próximo estado
         case (opcode)
-          7'b0110011: next_state = 4'b0010; // -> EXECUTE_R
-          7'b0010011: next_state = 4'b0011; // -> EXECUTE_I
-          7'b0000011: next_state = (funct3 == 3'b010) ? 4'b0100 : 4'b0000; // LW -> MEM_ADDR_CALC ou FETCH
-          7'b0100011: next_state = (funct3 == 3'b010) ? 4'b0100 : 4'b0000; // SW -> MEM_ADDR_CALC ou FETCH
-          7'b1110011: begin // SYSTEM (EBREAK)
-             if (funct3 == 3'b000 && instruction[31:20] == 12'b0) begin // EBREAK (Sim)
-                $display("EBREAK (Sim) encountered at PC=0x%h. Stopping simulation.", pc);
-                $finish;
-             end
-             next_state = 4'b0000; // -> FETCH
+          7'b0110011: next_state = 4'b0010; // R-type
+          7'b0010011: next_state = 4'b0011; // I-type (addi, andi, ori, xori)
+          7'b0000011: next_state = 4'b0100; // Load
+          7'b0100011: next_state = 4'b0100; // Store
+          7'b1101111: next_state = 4'b0011; // JAL
+          7'b0110111: next_state = 4'b0011; // LUI
+          7'b1110011: begin // EBREAK
+            if (funct3 == 3'b000 && instruction[31:20] == 12'b0) begin
+              PCWrite   = 1'b1;
+              pc_next   = 32'h00000FFC; // Termina simulação
+            end
+            next_state = 4'b0000;
           end
-          default: next_state = 4'b0000; // -> FETCH
+          default: next_state = 4'b0000; // Instrução inválida
         endcase
       end
 
       4'b0010: begin // EXECUTE_R
-        ALUSrcA    = 2'b01; // rs1
-        ALUSrcB    = 2'b00; // rs2
+        ALUSrcA = 2'b01;
+        ALUSrcB = 2'b00;
         case ({funct7[5], funct3})
-           4'b0_000: ALUControl = 4'b0000; // ADD
-           4'b1_000: ALUControl = 4'b0001; // SUB
-           4'b0_111: ALUControl = 4'b0010; // AND
-           4'b0_110: ALUControl = 4'b0011; // OR
-           4'b0_100: ALUControl = 4'b0100; // XOR
-           default:  ALUControl = 4'b1111; // Inválido
+          4'b0_000: ALUControl = 4'b0000; // ADD
+          4'b1_000: ALUControl = 4'b0001; // SUB
+          4'b0_111: ALUControl = 4'b0010; // AND
+          4'b0_110: ALUControl = 4'b0011; // OR
+          4'b0_100: ALUControl = 4'b0100; // XOR
+          default:  ALUControl = 4'b1111; // Não implementado
         endcase
-        next_state = 4'b0111; // -> WB_REG
+        next_state = 4'b0111; // Vai para write-back
       end
 
-      4'b0011: begin // EXECUTE_I
-        ALUSrcA    = 2'b01; // rs1
-        ALUSrcB    = 2'b01; // Imm
-        case (funct3)
-           3'b000: ALUControl = 4'b0000; // ADDI
-           3'b111: ALUControl = 4'b0010; // ANDI
-           3'b110: ALUControl = 4'b0011; // ORI
-           3'b100: ALUControl = 4'b0100; // XORI
-           default: ALUControl = 4'b1111; // Inválido
-        endcase
-        next_state = 4'b0111; // -> WB_REG
+      4'b0011: begin // EXECUTE_I ou JAL ou LUI
+        if (opcode == 7'b1101111) begin // JAL
+          PCWrite   = 1'b1;
+          RegWrite  = 1'b1;
+          ALUSrcA   = 2'b00;
+          ALUSrcB   = 2'b10;
+        end else if (opcode == 7'b0110111) begin // LUI
+          RegWrite  = 1'b1;
+        end else begin // ADDI, ANDI, etc.
+          ALUSrcA = 2'b01;
+          ALUSrcB = 2'b01;
+          case (funct3)
+            3'b000: ALUControl = 4'b0000; // ADDI
+            3'b111: ALUControl = 4'b0010; // ANDI
+            3'b110: ALUControl = 4'b0011; // ORI
+            3'b100: ALUControl = 4'b0100; // XORI
+            default: ALUControl = 4'b1111;
+          endcase
+        end
+        next_state = 4'b0111;
       end
 
-      4'b0100: begin // MEM_ADDR_CALC
-        ALUSrcA    = 2'b01; // rs1
-        ALUSrcB    = 2'b01; // Imm (I ou S)
-        ALUControl = 4'b0000; // ADD para calcular endereço
-        next_state = (opcode == 7'b0000011) ? 4'b0101 : 4'b0110; // -> MEM_READ ou MEM_WRITE
+      4'b0100: begin // MEM_ADDR_CALC para LOAD e STORE
+        ALUSrcA = 2'b01;
+        ALUSrcB = 2'b01;
+        ALUControl = 4'b0000; // ADD
+        next_state = (opcode == 7'b0000011) ? 4'b0101 : 4'b0110; // Load ou Store
       end
 
       4'b0101: begin // MEM_READ
-        AdrSrc     = 1'b1; // Endereço = Saída da ALU (registrada)
-        next_state = 4'b1000; // -> WB_MEM
+        AdrSrc = 1'b1;
+        next_state = 4'b1000;
       end
 
       4'b0110: begin // MEM_WRITE
-        AdrSrc     = 1'b1;  // Endereço = Saída da ALU (registrada)
-        MemWrite   = 1'b1;
-        PCWrite    = 1'b1;
-        next_state = 4'b0000; // -> FETCH
+        AdrSrc = 1'b1;
+        MemWrite = 1'b1;
+        PCWrite = 1'b1;
+        next_state = 4'b0000;
       end
 
       4'b0111: begin // WB_REG
-        RegWrite   = 1'b1;
-        MemToReg   = 1'b0;  // Dado vem da ALU (registrada)
-        PCWrite    = 1'b1;
-        next_state = 4'b0000; // -> FETCH
+        RegWrite = 1'b1;
+        MemToReg = 1'b0;
+        PCWrite = 1'b1;
+        next_state = 4'b0000;
       end
 
       4'b1000: begin // WB_MEM
-        RegWrite   = 1'b1;
-        MemToReg   = 1'b1;  // Dado vem da Memória (registrado)
-        PCWrite    = 1'b1;
-        next_state = 4'b0000; // -> FETCH
+        RegWrite = 1'b1;
+        MemToReg = 1'b1;
+        PCWrite = 1'b1;
+        next_state = 4'b0000;
       end
 
-      default: begin
-        next_state = 4'b0000; // -> FETCH (Estado inválido)
-      end
+      default: next_state = 4'b0000;
     endcase
 
     // Seleção do imediato
-     case (opcode)
-        7'b0010011: imm_comb = imm_i; // I-type ALU
-        7'b0000011: imm_comb = imm_i; // LW
-        7'b0100011: imm_comb = imm_s; // SW
-        default:    imm_comb = 32'b0;
-     endcase
+    case (opcode)
+      7'b0010011: imm_comb = imm_i;
+      7'b0000011: imm_comb = imm_i;
+      7'b0100011: imm_comb = imm_s;
+      7'b1101111: imm_comb = imm_j;
+      7'b0110111: imm_comb = imm_u;
+      default:    imm_comb = 32'b0;
+    endcase
 
-    // Entrada da ALU A
+    // Entradas da ALU
     alu_in_a = (ALUSrcA == 2'b00) ? pc : read_data1;
-
-    // B
     case (ALUSrcB)
-      2'b00:  alu_in_b = read_data2;
-      2'b01:  alu_in_b = imm_reg;
-      2'b10:  alu_in_b = 32'd4;
+      2'b00: alu_in_b = read_data2;
+      2'b01: alu_in_b = imm_reg;
+      2'b10: alu_in_b = 32'd4;
       default: alu_in_b = 32'b0;
     endcase
 
-    pc_next = pc_plus_4;
+    // Próximo PC
+    pc_next = (opcode == 7'b1101111) ? (pc + imm_j) : pc_plus_4;
 
-    write_back_data = (MemToReg == 1'b1) ? mem_data_reg : alu_result_reg;
+    // Dado que será escrito no registrador
+    write_back_data = (opcode == 7'b0110111) ? imm_reg :
+                      (MemToReg == 1'b1)     ? mem_data_reg :
+                                               alu_result_reg;
 
+    // Endereço e dados de escrita na memória
     address_reg = (AdrSrc == 1'b1) ? alu_result_reg : pc;
     we_reg = MemWrite;
     data_out_reg = read_data2;
+  end
 
-  end // Fim do always @(*)
-
-  assign address = address_reg; // Saída do adress é conectada ao valor interno de adress_reg. Pode conter o PC ou a saida da ALU
+  // Atribuições para fora do módulo
+  assign address = address_reg;
   assign we = we_reg;
   assign data_out = data_out_reg;
 
-  // == atualização de registrador
+  // Bloco sequencial
   always @(posedge clk or negedge resetn) begin
-    if (!resetn) begin // volta para o estado FETCH se resetar
+    if (!resetn) begin
       pc <= 32'b0;
-      state <= 4'b0000; // FETCH (Literal)
-      // Zera registradores do banco
-      for (i = 0; i < 32; i = i + 1) begin
+      state <= 4'b0000;
+      for (i = 0; i < 32; i = i + 1)
         registers[i] <= 32'b0;
-      end
-       instruction <= 32'b0;
-       read_data1 <= 32'b0;
-       read_data2 <= 32'b0;
-       imm_reg <= 32'b0;
-       alu_result_reg <= 32'b0;
-       mem_data_reg <= 32'b0;
-       rd_reg <= 5'b0;
-
+      instruction     <= 32'b0;
+      read_data1      <= 32'b0;
+      read_data2      <= 32'b0;
+      imm_reg         <= 32'b0;
+      alu_result_reg  <= 32'b0;
+      mem_data_reg    <= 32'b0;
+      rd_reg          <= 5'b0;
     end else begin
+      state <= next_state;
 
-      // Atualiza Estado
-      state <= next_state; // atualiza o estado a cada pulso de clock
-
-      // Atualiza PC
-      if (PCWrite) begin
+      if (PCWrite)
         pc <= pc_next;
+
+      if (IRWrite)
+        instruction <= data_in;
+
+      if (state == 4'b0001) begin // DECODE
+        read_data1 <= registers[rs1];
+        read_data2 <= registers[rs2];
+        imm_reg    <= imm_comb;
+        rd_reg     <= rd;
       end
 
-      if (IRWrite) begin
-        instruction <= data_in; // Memória de instruções
-      end
+      if (state == 4'b0010 || state == 4'b0011 || state == 4'b0100)
+        alu_result_reg <= alu_out;
 
-      if (state == 4'b0001) begin // DECODE (Literal)
-         read_data1 <= registers[rs1];
-         read_data2 <= registers[rs2];
-         imm_reg    <= imm_comb;
-         rd_reg     <= rd;
-      end
+      if (state == 4'b0101)
+        mem_data_reg <= data_in;
 
-      // Atualiza resutltado  da ALU (no final da EXECUTE/MEM_ADDR_CALC)
-      if (state == 4'b0010 || state == 4'b0011 || state == 4'b0100) begin // EXECUTE_R, EXECUTE_I, MEM_ADDR_CALC (Literais)
-         alu_result_reg <= alu_out;
-      end
-
-       if (state == 4'b0101) begin // MEM_READ (Literal)
-         mem_data_reg <= data_in;
-       end
-
-      if (RegWrite && rd_reg != 5'b0) begin
+      if (RegWrite && rd_reg != 5'b0)
         registers[rd_reg] <= write_back_data;
-      end
+    end
+  end
 
-    end // Fim else do reset
-  end // Fim do always @(posedge clk or negedge resetn)
-
-  // Inicialização do banco de registradores
-   initial begin
-       for (k = 0; k < 32; k = k + 1) begin
-           registers[k] = 32'b0;
-       end
-   end
-
-endmodule // Fim do core
+  // Inicialização dos registradores
+  initial begin
+    for (k = 0; k < 32; k = k + 1)
+      registers[k] = 32'b0;
+  end
+endmodule
