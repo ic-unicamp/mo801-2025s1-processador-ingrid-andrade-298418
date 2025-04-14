@@ -1,18 +1,21 @@
 // == Módulo da ALU
 module alu(
   input [31:0] a, // Operando A
-  input [31:0] b, // Operando B
+  input [31:0] b, // Operando B (neste caso, b[4:0] é usado para shift)
   input [3:0] alu_control, // Código de controle da operação ALU
   output reg [31:0] result // Resultado da operação
 );
   always @(*) begin
     case (alu_control)
-      4'b0000: result = a + b; // Adição
-      4'b0001: result = a - b; // Subtração
-      4'b0010: result = a & b; // AND bit a bit
-      4'b0011: result = a | b; // OR bit a bit
-      4'b0100: result = a ^ b; // XOR bit a bit
-      default: result = 32'b0; // Operação inválida
+      4'b0000: result = a + b;      // Adição (ADDI ou ADD)
+      4'b0001: result = a - b;      // Subtração (SUB)
+      4'b0010: result = a & b;      // AND
+      4'b0011: result = a | b;      // OR
+      4'b0100: result = a ^ b;      // XOR
+      4'b0101: result = a << b[4:0]; // SLLI (deslocamento lógico à esquerda)
+      4'b0110: result = a >> b[4:0]; // SRLI (deslocamento lógico à direita)
+      4'b0111: result = $signed(a) >>> b[4:0]; // SRAI (deslocamento aritmético à direita)
+      default: result = 32'b0;      // Operação inválida
     endcase
   end
 endmodule
@@ -120,14 +123,14 @@ module core(
       4'b0001: begin // DECODE
         case (opcode)
           7'b0110011: next_state = 4'b0010; // R-type
-          7'b0010011: next_state = 4'b0011; // I-type (addi, andi, ori, xori)
-          7'b0000011: begin // Load
+          7'b0010011: next_state = 4'b0011; // I-type (ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI)
+          7'b0000011: begin // LOAD
                          if (funct3 == 3'b010)
                            next_state = 4'b0100; // LW
                          else
-                           next_state = 4'b0000; // Instrução inválida para Load
+                           next_state = 4'b0000; // Instrução inválida para LOAD
                        end
-          7'b0100011: next_state = 4'b0100; // Store
+          7'b0100011: next_state = 4'b0100; // STORE
           7'b1101111: next_state = 4'b0011; // JAL
           7'b0110111: next_state = 4'b0011; // LUI
           7'b1110011: begin // EBREAK
@@ -155,19 +158,32 @@ module core(
         next_state = 4'b0111; // Vai para write-back
       end
 
-      4'b0011: begin // EXECUTE_I ou JAL ou LUI
+      4'b0011: begin // EXECUTE_I (inclui ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI) ou JAL ou LUI
+        // Se for JAL, mantém a lógica já existente
         if (opcode == 7'b1101111) begin // JAL
           PCWrite   = 1'b1;
           RegWrite  = 1'b1;
           ALUSrcA   = 2'b00;
           ALUSrcB   = 2'b10;
-        end else if (opcode == 7'b0110111) begin // LUI
+        end
+        else if (opcode == 7'b0110111) begin // LUI
           RegWrite  = 1'b1;
-        end else begin // ADDI, ANDI, etc.
+        end
+        else begin // Instruções I-type
           ALUSrcA = 2'b01;
           ALUSrcB = 2'b01;
           case (funct3)
             3'b000: ALUControl = 4'b0000; // ADDI
+            3'b001: ALUControl = 4'b0101; // SLLI
+            3'b101: begin
+                      // SRLI ou SRAI: distingue-se pelo funct7
+                      if (funct7 == 7'b0000000)
+                        ALUControl = 4'b0110; // SRLI
+                      else if (funct7 == 7'b0100000)
+                        ALUControl = 4'b0111; // SRAI
+                      else
+                        ALUControl = 4'b1111;
+                    end
             3'b111: ALUControl = 4'b0010; // ANDI
             3'b110: ALUControl = 4'b0011; // ORI
             3'b100: ALUControl = 4'b0100; // XORI

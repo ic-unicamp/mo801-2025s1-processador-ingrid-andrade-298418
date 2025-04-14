@@ -1,0 +1,43 @@
+00200093
+00309113
+00215193
+ff000213
+40225293
+40000313
+00630333
+00232023
+00332223
+00532423
+7d50006f
+
+// Referente à instrução:
+
+//    .text
+//    .globl _start
+//_start:
+//    # Inicializa x1 com 2
+//    addi    x1, x0, 2        # x1 = 2
+
+//    # SLLI: desloca x1 3 bits à esquerda => x2 = 2 << 3 = 16
+//    slli    x2, x1, 3        # x2 = 16
+
+//    # SRLI: desloca x2 2 bits à direita (lógico) => x3 = 16 >> 2 = 4
+//    srli    x3, x2, 2        # x3 = 4
+
+//    # Prepara um valor negativo para testar SRAI
+//    addi    x4, x0, -16      # x4 = -16 (0xFFFFFFF0 em 32 bits)
+
+//    # SRAI: desloca x4 2 bits à direita aritmeticamente 
+//    # Espera-se: -16 >> 2 = -4 (0xFFFFFFFC)
+//    srai    x5, x4, 2        # x5 = -4
+
+//    # Armazena os resultados em memória para verificação.
+//    # Usa x6 como base de endereço (por exemplo, 0x0400 << 1 = 0x0800)
+//    addi    x6, x0, 0x0400   # x6 = 0x400
+//    add     x6, x6, x6       # x6 = 0x800
+
+//   sw      x2, 0(x6)        # Armazena x2 (16) em M[0x800]
+//    sw      x3, 4(x6)        # Armazena x3 (4) em M[0x804]
+//    sw      x5, 8(x6)        # Armazena x5 (-4) em M[0x808]
+
+//    j       0x0FFC          # Salta para 0x0FFC para encerrar a simulação
