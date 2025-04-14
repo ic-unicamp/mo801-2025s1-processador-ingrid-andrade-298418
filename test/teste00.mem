@@ -1,5 +1,0 @@
-40000093 //  addi x1, x0, 0x0400 // monta o endereço
-001080b3 // add  x1, x1, x1  // monta o endereço
-00500113 // addi x2, x0, 5 // instrução para testar
-0020a023 // sw   x2, 0(x1) // "printf"
-7ed0006f // j    0x0FFC // encerra a simulação

@@ -1,1 +1,2 @@
-EBREAK (Sim) encountered at PC=0x00000024. Stopping simulation.
+M[0x00000800] <- 0x00000005
+Address reached 4092 (0xFFC). Stopping simulation.
