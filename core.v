@@ -7,17 +7,17 @@ module alu(
 );
   always @(*) begin
     case (alu_control)
-      4'b0000: result = a + b;            // Adição (ADDI ou ADD)
-      4'b0001: result = a - b;            // Subtração (SUB)
-      4'b0010: result = a & b;            // AND
-      4'b0011: result = a | b;            // OR
-      4'b0100: result = a ^ b;            // XOR
-      4'b0101: result = a << b[4:0];       // SLLI (deslocamento lógico à esquerda)
-      4'b0110: result = a >> b[4:0];       // SRLI (deslocamento lógico à direita)
-      4'b0111: result = $signed(a) >>> b[4:0]; // SRAI (deslocamento aritmético à direita)
-      4'b1000: result = ($signed(a) < $signed(b)) ? 32'd1 : 32'd0; // SLT (set on less than - com sinal)
-      4'b1001: result = (a < b) ? 32'd1 : 32'd0;                    // SLTU (set on less than - sem sinal)
-      default: result = 32'b0;            // Operação inválida
+      4'b0000: result = a + b;                    // Adição (ADDI ou ADD)
+      4'b0001: result = a - b;                    // Subtração (SUB)
+      4'b0010: result = a & b;                    // AND
+      4'b0011: result = a | b;                    // OR
+      4'b0100: result = a ^ b;                    // XOR
+      4'b0101: result = a << b[4:0];               // SLLI (deslocamento lógico à esquerda)
+      4'b0110: result = a >> b[4:0];               // SRLI (deslocamento lógico à direita)
+      4'b0111: result = $signed(a) >>> b[4:0];      // SRAI (deslocamento aritmético à direita)
+      4'b1000: result = ($signed(a) < $signed(b)) ? 32'd1 : 32'd0; // SLT (R-type ou SLTI)
+      4'b1001: result = (a < b) ? 32'd1 : 32'd0;    // SLTU (R-type ou SLTIU)
+      default: result = 32'b0;                    // Operação inválida
     endcase
   end
 endmodule
@@ -49,12 +49,12 @@ module core(
   reg [4:0]  rd_reg; // Registrador destino
 
   // Campos da instrução
-  wire [6:0] opcode = instruction[6:0];
-  wire [4:0] rd     = instruction[11:7];
-  wire [2:0] funct3 = instruction[14:12];
-  wire [4:0] rs1    = instruction[19:15];
-  wire [4:0] rs2    = instruction[24:20];
-  wire [6:0] funct7 = instruction[31:25];
+  wire [6:0] opcode  = instruction[6:0];
+  wire [4:0] rd      = instruction[11:7];
+  wire [2:0] funct3  = instruction[14:12];
+  wire [4:0] rs1     = instruction[19:15];
+  wire [4:0] rs2     = instruction[24:20];
+  wire [6:0] funct7  = instruction[31:25];
 
   // Sinais de controle
   reg        PCWrite;
@@ -70,7 +70,8 @@ module core(
   // Imediatos
   wire [31:0] imm_i = {{20{instruction[31]}}, instruction[31:20]};
   wire [31:0] imm_s = {{20{instruction[31]}}, instruction[31:25], instruction[11:7]};
-  wire [31:0] imm_j = {{12{instruction[31]}}, instruction[19:12], instruction[20], instruction[30:21], 1'b0};
+  wire [31:0] imm_j = {{12{instruction[31]}}, instruction[19:12],
+                        instruction[20], instruction[30:21], 1'b0};
   wire [31:0] imm_u = {instruction[31:12], 12'b0};
 
   // PC + 4
@@ -123,14 +124,13 @@ module core(
       end
 
       4'b0001: begin // DECODE
-        // Carrega os operandos e imediato
-        // Observação: Para instruções de branch, o imediato é calculado conforme o B-type
-        // e já será armazenado em imm_reg.
+        // Carrega os operandos e imediato.
+        // Para branch, o imediato é calculado conforme o formato B-type e já será armazenado em imm_reg.
         case (opcode)
           7'b0110011: next_state = 4'b0010; // R-type
-          7'b0010011: next_state = 4'b0011; // I-type (ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI)
+          7'b0010011: next_state = 4'b0011; // I-type (ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI, SLTI, SLTIU)
           7'b0000011: next_state = 4'b0100; // LOAD
-          7'b0100011: next_state = 4'b0100; // STORE
+          7'b0100011: next_state = 4'b0100; // STORE (SB, SH, SW)
           7'b1101111: next_state = 4'b0011; // JAL
           7'b0110111: next_state = 4'b0011; // LUI
           7'b1110011: begin // EBREAK
@@ -148,7 +148,7 @@ module core(
       4'b0010: begin // EXECUTE_R (R-type)
         ALUSrcA = 2'b01;
         ALUSrcB = 2'b00;
-        // Verifica instruções de comparação:
+        // Verifica instruções de comparação R-type:
         // SLT: funct3 = 010, SLTU: funct3 = 011, com funct7 = 0000000.
         if (funct3 == 3'b010 && funct7 == 7'b0000000)
           ALUControl = 4'b1000; // SLT
@@ -168,7 +168,7 @@ module core(
         next_state = 4'b0111; // Vai para write-back
       end
 
-      4'b0011: begin // EXECUTE_I (I-type, JAL ou LUI)
+      4'b0011: begin // EXECUTE_I (I-type: ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI, SLTI, SLTIU, JAL, LUI)
         if (opcode == 7'b1101111) begin // JAL
           PCWrite   = 1'b1;
           RegWrite  = 1'b1;
@@ -184,6 +184,9 @@ module core(
           case (funct3)
             3'b000: ALUControl = 4'b0000; // ADDI
             3'b001: ALUControl = 4'b0101; // SLLI
+            // Suporte para SLTI e SLTIU:
+            3'b010: ALUControl = 4'b1000; // SLTI
+            3'b011: ALUControl = 4'b1001; // SLTIU
             3'b101: begin
                       if (funct7 == 7'b0000000)
                         ALUControl = 4'b0110; // SRLI
@@ -227,7 +230,7 @@ module core(
         next_state = 4'b0000;
       end
 
-      4'b1000: begin // WB_MEM (write-back para load)
+      4'b1000: begin // WB_MEM (write-back para LOAD)
         RegWrite = 1'b1;
         MemToReg = 1'b1;
         PCWrite = 1'b1;
@@ -241,7 +244,7 @@ module core(
         if ((funct3 == 3'b000 && read_data1 == read_data2) ||
             (funct3 == 3'b001 && read_data1 != read_data2)) begin
           PCWrite = 1'b1;
-          pc_next = pc + imm_reg;  // Utiliza imediato B-type já em imm_reg
+          pc_next = pc + imm_reg;  // Utiliza imediato B-type
         end else begin
           PCWrite = 1'b1;
           pc_next = pc_plus_4;
@@ -255,7 +258,7 @@ module core(
     // Seleção do imediato conforme formatos (I, S, J, U e B)
     case (opcode)
       7'b0010011: imm_comb = imm_i;
-      7'b0000011: imm_comb = imm_i;  // LW utiliza o imediato I
+      7'b0000011: imm_comb = imm_i;  // LOAD usa o imediato I
       7'b0100011: imm_comb = imm_s;
       7'b1101111: imm_comb = imm_j;
       7'b0110111: imm_comb = imm_u;
@@ -280,10 +283,26 @@ module core(
     write_back_data = (opcode == 7'b0110111) ? imm_reg :
                       (MemToReg == 1'b1)     ? mem_data_reg : alu_result_reg;
 
-    // Geração dos sinais de endereço e escrita para memória
+    // Geração dos sinais de endereço e escrita para a memória.
+    // Para instruções store (opcode 0100011), se for SB ou SH,
+    // realizamos um "read-modify-write" utilizando data_in (conteúdo atual da memória)
+    // para atualizar apenas os byte(s) desejados baseado em address[1:0].
     address_reg = (AdrSrc == 1'b1) ? alu_result_reg : pc;
     we_reg = MemWrite;
-    data_out_reg = read_data2;
+    if (opcode == 7'b0100011) begin // STORE
+      case (funct3)
+        3'b000: // SB: atualiza 8 bits na posição determinada pelo offset (address[1:0])
+          data_out_reg = (data_in & ~(32'hFF << (address[1:0]*8))) |
+                         ((read_data2[7:0] & 8'hFF) << (address[1:0]*8));
+        3'b001: // SH: atualiza 16 bits (halfword) – offset deve ser 0 ou 2
+          data_out_reg = (data_in & ~(32'hFFFF << (address[1:0]*8))) |
+                         ((read_data2[15:0] & 16'hFFFF) << (address[1:0]*8));
+        default: // SW: store word
+          data_out_reg = read_data2;
+      endcase
+    end else begin
+      data_out_reg = read_data2;
+    end
   end
 
   // Atribuições para as saídas do módulo
@@ -291,7 +310,7 @@ module core(
   assign we = we_reg;
   assign data_out = data_out_reg;
 
-  // Bloco sequencial (executa em fronteira de clock)
+  // Bloco sequencial (executa na fronteira de clock)
   always @(posedge clk or negedge resetn) begin
     if (!resetn) begin
       pc <= 32'b0;

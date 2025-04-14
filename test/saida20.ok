@@ -1,0 +1,3 @@
+M[0x00000800] <- 0x001200ab
+M[0x00000804] <- 0x00221234
+Address reached 4092 (0xFFC). Stopping simulation.

@@ -11,3 +11,32 @@
 00840433
 00742223
 7cd0006f
+
+// Referente a instrução:
+//        .text
+//        .globl _start
+// _start:
+//        # Inicializa x1 e x2 para testar SLT
+//        addi    x1, x0, 5       # x1 = 5
+//        addi    x2, x0, 10      # x2 = 10
+//       # Executa SLT: slt x3, x1, x2 -> x3 = 1, pois 5 < 10 (com sinal)
+//        slt     x3, x1, x2
+//
+//        # Prepara o endereço para store: base 0x800
+//       addi    x4, x0, 0x0400  # x4 = 0x400
+//        add     x4, x4, x4      # x4 = 0x800
+//        sw      x3, 0(x4)       # Armazena o resultado de SLT em M[0x800]
+//
+//        # Inicializa x5 e x6 para testar SLTU
+//        addi    x5, x0, 15      # x5 = 15
+//        addi    x6, x0, 10      # x6 = 10
+//        # Executa SLTU: sltu x7, x5, x6 -> x7 = 0, pois 15 não é menor que 10 (sem sinal)
+//        sltu    x7, x5, x6
+//
+//        # Prepara endereço para store do resultado de SLTU em M[0x804]
+//        addi    x8, x0, 0x0400  # x8 = 0x400
+//        add     x8, x8, x8      # x8 = 0x800
+//        sw      x7, 4(x8)       # Armazena o resultado de SLTU em M[0x804]
+//
+//        # Finaliza a simulação
+//        j       0x0FFC          # Salta para 0x0FFC para encerrar a simulação
