@@ -82,7 +82,7 @@ module core(
   reg [31:0] alu_in_b;
   reg [31:0] write_back_data;
 
-  // Saídas da memória
+  // Endereço e dados de escrita na memória (sinais de saída)
   reg        we_reg;
   reg [31:0] address_reg;
   reg [31:0] data_out_reg;
@@ -121,15 +121,13 @@ module core(
       end
 
       4'b0001: begin // DECODE
+        // Carrega os operandos e imediato
+        // Observação: Para instruções de branch, o imediato é calculado conforme o B-type
+        // e já será armazenado em imm_reg.
         case (opcode)
           7'b0110011: next_state = 4'b0010; // R-type
           7'b0010011: next_state = 4'b0011; // I-type (ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI)
-          7'b0000011: begin // LOAD
-                         if (funct3 == 3'b010)
-                           next_state = 4'b0100; // LW
-                         else
-                           next_state = 4'b0000; // Instrução inválida para LOAD
-                       end
+          7'b0000011: next_state = 4'b0100; // LOAD
           7'b0100011: next_state = 4'b0100; // STORE
           7'b1101111: next_state = 4'b0011; // JAL
           7'b0110111: next_state = 4'b0011; // LUI
@@ -140,6 +138,7 @@ module core(
                           end
                           next_state = 4'b0000;
                         end
+          7'b1100011: next_state = 4'b1010; // Branch: BEQ e BNE
           default: next_state = 4'b0000; // Instrução inválida
         endcase
       end
@@ -159,7 +158,6 @@ module core(
       end
 
       4'b0011: begin // EXECUTE_I (inclui ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI) ou JAL ou LUI
-        // Se for JAL, mantém a lógica já existente
         if (opcode == 7'b1101111) begin // JAL
           PCWrite   = 1'b1;
           RegWrite  = 1'b1;
@@ -212,30 +210,47 @@ module core(
         next_state = 4'b0000;
       end
 
-      4'b0111: begin // WB_REG
+      4'b0111: begin // WB_REG (write-back para operações aritméticas)
         RegWrite = 1'b1;
         MemToReg = 1'b0;
         PCWrite = 1'b1;
         next_state = 4'b0000;
       end
 
-      4'b1000: begin // WB_MEM
+      4'b1000: begin // WB_MEM (write-back para load)
         RegWrite = 1'b1;
         MemToReg = 1'b1;
         PCWrite = 1'b1;
         next_state = 4'b0000;
       end
 
+      4'b1010: begin // BRANCH (BEQ e BNE)
+        // Avalia a condição de branch:
+        // BEQ (funct3 == 000): branch se x[rs1] == x[rs2]
+        // BNE (funct3 == 001): branch se x[rs1] != x[rs2]
+        if ((funct3 == 3'b000 && read_data1 == read_data2) ||
+            (funct3 == 3'b001 && read_data1 != read_data2)) begin
+          PCWrite = 1'b1;
+          pc_next = pc + imm_reg;  // Utiliza imediato B-type já em imm_reg
+        end else begin
+          PCWrite = 1'b1;
+          pc_next = pc_plus_4;
+        end
+        next_state = 4'b0000;
+      end
+
       default: next_state = 4'b0000;
     endcase
 
-    // Seleção do imediato
+    // Seleção do imediato conforme formatos (I, S, J, U e B)
     case (opcode)
       7'b0010011: imm_comb = imm_i;
       7'b0000011: imm_comb = imm_i;  // LW utiliza o imediato I
       7'b0100011: imm_comb = imm_s;
       7'b1101111: imm_comb = imm_j;
       7'b0110111: imm_comb = imm_u;
+      7'b1100011: imm_comb = {{20{instruction[31]}}, instruction[7],
+                              instruction[30:25], instruction[11:8], 1'b0}; // Branch (B-type)
       default:    imm_comb = 32'b0;
     endcase
 
@@ -248,26 +263,26 @@ module core(
       default: alu_in_b = 32'b0;
     endcase
 
-    // Próximo PC
+    // Próximo PC (padrão: PC+4, exceto se branch ou JAL)
     pc_next = (opcode == 7'b1101111) ? (pc + imm_j) : pc_plus_4;
 
-    // Dado que será escrito no registrador
+    // Seleção do dado para escrita no registrador
     write_back_data = (opcode == 7'b0110111) ? imm_reg :
                       (MemToReg == 1'b1)     ? mem_data_reg :
                                                alu_result_reg;
 
-    // Endereço e dados de escrita na memória
+    // Geração dos sinais de endereço e escrita para memória
     address_reg = (AdrSrc == 1'b1) ? alu_result_reg : pc;
     we_reg = MemWrite;
     data_out_reg = read_data2;
   end
 
-  // Atribuições para fora do módulo
+  // Atribuições para as saídas do módulo
   assign address = address_reg;
   assign we = we_reg;
   assign data_out = data_out_reg;
 
-  // Bloco sequencial
+  // Bloco sequencial (executa em fronteira de clock)
   always @(posedge clk or negedge resetn) begin
     if (!resetn) begin
       pc <= 32'b0;
@@ -290,7 +305,7 @@ module core(
       if (IRWrite)
         instruction <= data_in;
 
-      if (state == 4'b0001) begin // DECODE
+      if (state == 4'b0001) begin // DECODE: carrega operandos e imediato
         read_data1 <= registers[rs1];
         read_data2 <= registers[rs2];
         imm_reg    <= imm_comb;
