@@ -1,0 +1,19 @@
+40000093
+001080b3
+00500113
+0020a023
+0000a183
+00018233
+7e50006f
+
+// Referente à instrução
+//     .text
+//    .globl _start
+//_start:
+//    addi    x1, x0, 0x0400   # x1 = 0x400
+//    add     x1, x1, x1       # x1 = 0x800 (endereço de memória monitorado)
+//    addi    x2, x0, 5        # x2 = 5
+//    sw      x2, 0(x1)        # Armazena 5 em M[0x800]
+//    lw      x3, 0(x1)        # Carrega de M[0x800] para x3
+//    add     x4, x3, x0       # Move x3 para x4 (apenas para utilizar o LW)
+//    j       0x0FFC           # Salta para 0x0FFC para terminar a simulação

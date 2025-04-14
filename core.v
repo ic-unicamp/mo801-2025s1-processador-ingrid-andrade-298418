@@ -121,17 +121,22 @@ module core(
         case (opcode)
           7'b0110011: next_state = 4'b0010; // R-type
           7'b0010011: next_state = 4'b0011; // I-type (addi, andi, ori, xori)
-          7'b0000011: next_state = 4'b0100; // Load
+          7'b0000011: begin // Load
+                         if (funct3 == 3'b010)
+                           next_state = 4'b0100; // LW
+                         else
+                           next_state = 4'b0000; // Instrução inválida para Load
+                       end
           7'b0100011: next_state = 4'b0100; // Store
           7'b1101111: next_state = 4'b0011; // JAL
           7'b0110111: next_state = 4'b0011; // LUI
           7'b1110011: begin // EBREAK
-            if (funct3 == 3'b000 && instruction[31:20] == 12'b0) begin
-              PCWrite   = 1'b1;
-              pc_next   = 32'h00000FFC; // Termina simulação
-            end
-            next_state = 4'b0000;
-          end
+                          if (funct3 == 3'b000 && instruction[31:20] == 12'b0) begin
+                            PCWrite   = 1'b1;
+                            pc_next   = 32'h00000FFC; // Termina simulação
+                          end
+                          next_state = 4'b0000;
+                        end
           default: next_state = 4'b0000; // Instrução inválida
         endcase
       end
@@ -211,7 +216,7 @@ module core(
     // Seleção do imediato
     case (opcode)
       7'b0010011: imm_comb = imm_i;
-      7'b0000011: imm_comb = imm_i;
+      7'b0000011: imm_comb = imm_i;  // LW utiliza o imediato I
       7'b0100011: imm_comb = imm_s;
       7'b1101111: imm_comb = imm_j;
       7'b0110111: imm_comb = imm_u;
