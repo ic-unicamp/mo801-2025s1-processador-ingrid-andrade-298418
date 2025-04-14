@@ -1,33 +1,35 @@
 // == Módulo da ALU
 module alu(
-  input [31:0] a, // Operando A
-  input [31:0] b, // Operando B (neste caso, b[4:0] é usado para shift)
-  input [3:0] alu_control, // Código de controle da operação ALU
-  output reg [31:0] result // Resultado da operação
+  input [31:0] a,            // Operando A
+  input [31:0] b,            // Operando B (neste caso, b[4:0] é usado para shift)
+  input [3:0] alu_control,   // Código de controle da operação ALU
+  output reg [31:0] result   // Resultado da operação
 );
   always @(*) begin
     case (alu_control)
-      4'b0000: result = a + b;      // Adição (ADDI ou ADD)
-      4'b0001: result = a - b;      // Subtração (SUB)
-      4'b0010: result = a & b;      // AND
-      4'b0011: result = a | b;      // OR
-      4'b0100: result = a ^ b;      // XOR
-      4'b0101: result = a << b[4:0]; // SLLI (deslocamento lógico à esquerda)
-      4'b0110: result = a >> b[4:0]; // SRLI (deslocamento lógico à direita)
+      4'b0000: result = a + b;            // Adição (ADDI ou ADD)
+      4'b0001: result = a - b;            // Subtração (SUB)
+      4'b0010: result = a & b;            // AND
+      4'b0011: result = a | b;            // OR
+      4'b0100: result = a ^ b;            // XOR
+      4'b0101: result = a << b[4:0];       // SLLI (deslocamento lógico à esquerda)
+      4'b0110: result = a >> b[4:0];       // SRLI (deslocamento lógico à direita)
       4'b0111: result = $signed(a) >>> b[4:0]; // SRAI (deslocamento aritmético à direita)
-      default: result = 32'b0;      // Operação inválida
+      4'b1000: result = ($signed(a) < $signed(b)) ? 32'd1 : 32'd0; // SLT (set on less than - com sinal)
+      4'b1001: result = (a < b) ? 32'd1 : 32'd0;                    // SLTU (set on less than - sem sinal)
+      default: result = 32'b0;            // Operação inválida
     endcase
   end
 endmodule
 
 // == Módulo do processador principal (core)
 module core(
-  input        clk,           // Clock
-  input        resetn,        // Reset ativo em 0
-  output       we,            // Sinal de escrita na memória
-  output [31:0] address,      // Endereço de acesso à memória
-  output [31:0] data_out,     // Dados a serem escritos na memória
-  input  [31:0] data_in       // Dados lidos da memória
+  input        clk,         // Clock
+  input        resetn,      // Reset ativo em 0
+  output       we,          // Sinal de escrita na memória
+  output [31:0] address,    // Endereço de acesso à memória
+  output [31:0] data_out,   // Dados a serem escritos na memória
+  input  [31:0] data_in     // Dados lidos da memória
 );
 
   // Máquina de estados
@@ -132,32 +134,41 @@ module core(
           7'b1101111: next_state = 4'b0011; // JAL
           7'b0110111: next_state = 4'b0011; // LUI
           7'b1110011: begin // EBREAK
-                          if (funct3 == 3'b000 && instruction[31:20] == 12'b0) begin
-                            PCWrite   = 1'b1;
-                            pc_next   = 32'h00000FFC; // Termina simulação
-                          end
-                          next_state = 4'b0000;
+                        if (funct3 == 3'b000 && instruction[31:20] == 12'b0) begin
+                          PCWrite   = 1'b1;
+                          pc_next   = 32'h00000FFC; // Termina simulação
                         end
+                        next_state = 4'b0000;
+                      end
           7'b1100011: next_state = 4'b1010; // Branch: BEQ e BNE
           default: next_state = 4'b0000; // Instrução inválida
         endcase
       end
 
-      4'b0010: begin // EXECUTE_R
+      4'b0010: begin // EXECUTE_R (R-type)
         ALUSrcA = 2'b01;
         ALUSrcB = 2'b00;
-        case ({funct7[5], funct3})
-          4'b0_000: ALUControl = 4'b0000; // ADD
-          4'b1_000: ALUControl = 4'b0001; // SUB
-          4'b0_111: ALUControl = 4'b0010; // AND
-          4'b0_110: ALUControl = 4'b0011; // OR
-          4'b0_100: ALUControl = 4'b0100; // XOR
-          default:  ALUControl = 4'b1111; // Não implementado
-        endcase
+        // Verifica instruções de comparação:
+        // SLT: funct3 = 010, SLTU: funct3 = 011, com funct7 = 0000000.
+        if (funct3 == 3'b010 && funct7 == 7'b0000000)
+          ALUControl = 4'b1000; // SLT
+        else if (funct3 == 3'b011 && funct7 == 7'b0000000)
+          ALUControl = 4'b1001; // SLTU
+        else begin
+          // Instruções aritméticas comuns
+          case ({funct7[5], funct3})
+            4'b0_000: ALUControl = 4'b0000; // ADD
+            4'b1_000: ALUControl = 4'b0001; // SUB
+            4'b0_111: ALUControl = 4'b0010; // AND
+            4'b0_110: ALUControl = 4'b0011; // OR
+            4'b0_100: ALUControl = 4'b0100; // XOR
+            default:  ALUControl = 4'b1111; // Não implementado
+          endcase
+        end
         next_state = 4'b0111; // Vai para write-back
       end
 
-      4'b0011: begin // EXECUTE_I (inclui ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI) ou JAL ou LUI
+      4'b0011: begin // EXECUTE_I (I-type, JAL ou LUI)
         if (opcode == 7'b1101111) begin // JAL
           PCWrite   = 1'b1;
           RegWrite  = 1'b1;
@@ -167,14 +178,13 @@ module core(
         else if (opcode == 7'b0110111) begin // LUI
           RegWrite  = 1'b1;
         end
-        else begin // Instruções I-type
+        else begin // Outras instruções I-type
           ALUSrcA = 2'b01;
           ALUSrcB = 2'b01;
           case (funct3)
             3'b000: ALUControl = 4'b0000; // ADDI
             3'b001: ALUControl = 4'b0101; // SLLI
             3'b101: begin
-                      // SRLI ou SRAI: distingue-se pelo funct7
                       if (funct7 == 7'b0000000)
                         ALUControl = 4'b0110; // SRLI
                       else if (funct7 == 7'b0100000)
@@ -268,8 +278,7 @@ module core(
 
     // Seleção do dado para escrita no registrador
     write_back_data = (opcode == 7'b0110111) ? imm_reg :
-                      (MemToReg == 1'b1)     ? mem_data_reg :
-                                               alu_result_reg;
+                      (MemToReg == 1'b1)     ? mem_data_reg : alu_result_reg;
 
     // Geração dos sinais de endereço e escrita para memória
     address_reg = (AdrSrc == 1'b1) ? alu_result_reg : pc;
@@ -298,26 +307,20 @@ module core(
       rd_reg          <= 5'b0;
     end else begin
       state <= next_state;
-
       if (PCWrite)
         pc <= pc_next;
-
       if (IRWrite)
         instruction <= data_in;
-
       if (state == 4'b0001) begin // DECODE: carrega operandos e imediato
         read_data1 <= registers[rs1];
         read_data2 <= registers[rs2];
         imm_reg    <= imm_comb;
         rd_reg     <= rd;
       end
-
       if (state == 4'b0010 || state == 4'b0011 || state == 4'b0100)
         alu_result_reg <= alu_out;
-
       if (state == 4'b0101)
         mem_data_reg <= data_in;
-
       if (RegWrite && rd_reg != 5'b0)
         registers[rd_reg] <= write_back_data;
     end

@@ -15,3 +15,37 @@
 00840433
 00742223
 7bd0006f
+
+// Referênte à Instrução
+// 
+//        .text
+//        .globl _start
+//_start:
+//        # Teste BEQ: x1 == x2, branch tomado
+//        addi    x1, x0, 5       # x1 = 5
+//        addi    x2, x0, 5       # x2 = 5
+//        beq     x1, x2, label_BEQ   # Se iguais, desvia para label_BEQ
+//        addi    x7, x0, 999     # Esta instrução NÃO será executada
+
+// label_BEQ:
+//        # Armazena 42 em memória
+//        addi    x3, x0, 0x0400  # x3 = 0x400
+//        add     x3, x3, x3      # x3 = 0x800
+//        addi    x4, x0, 42      # x4 = 42
+//        sw      x4, 0(x3)       # Armazena 42 em M[0x800]
+//
+//        # Teste BNE: x5 != x6, branch tomado
+//        addi    x5, x0, 100     # x5 = 100
+//        addi    x6, x0, 200     # x6 = 200
+//        bne     x5, x6, label_BNE   # Se diferentes, desvia para label_BNE
+//        addi    x4, x0, 77      # Esta instrução NÃO será executada
+
+// label_BNE:
+//       # Armazena 55 em memória
+//        addi    x7, x0, 55      # x7 = 55
+//        addi    x8, x0, 0x0400  # x8 = 0x400
+//        add     x8, x8, x8      # x8 = 0x800
+//        sw      x7, 4(x8)       # Armazena 55 em M[0x804]
+
+//       # Finaliza a simulação
+//        j       0x0FFC          # Salta para 0x0FFC para encerrar a simulação
