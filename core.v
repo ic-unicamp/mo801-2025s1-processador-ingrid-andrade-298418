@@ -133,6 +133,7 @@ module core(
           7'b0100011: next_state = 4'b0100; // STORE (SB, SH, SW)
           7'b1101111: next_state = 4'b0011; // JAL
           7'b0110111: next_state = 4'b0011; // LUI
+          7'b0010111: next_state = 4'b0011; // AUIPC (nova instrução)
           7'b1110011: begin // EBREAK
                         if (funct3 == 3'b000 && instruction[31:20] == 12'b0) begin
                           PCWrite   = 1'b1;
@@ -178,13 +179,18 @@ module core(
         else if (opcode == 7'b0110111) begin // LUI
           RegWrite  = 1'b1;
         end
+        else if (opcode == 7'b0010111) begin // AUIPC
+          ALUSrcA = 2'b01; // Usa o PC
+          ALUSrcB = 2'b01; // Usa o imediato
+          ALUControl = 4'b0000; // Adição (para AUIPC)
+          next_state = 4'b0111; // Vai para write-back
+        end
         else begin // Outras instruções I-type
           ALUSrcA = 2'b01;
           ALUSrcB = 2'b01;
           case (funct3)
             3'b000: ALUControl = 4'b0000; // ADDI
             3'b001: ALUControl = 4'b0101; // SLLI
-            // Suporte para SLTI e SLTIU:
             3'b010: ALUControl = 4'b1000; // SLTI
             3'b011: ALUControl = 4'b1001; // SLTIU
             3'b101: begin
@@ -238,9 +244,6 @@ module core(
       end
 
       4'b1010: begin // BRANCH (BEQ e BNE)
-        // Avalia a condição de branch:
-        // BEQ (funct3 == 000): branch se x[rs1] == x[rs2]
-        // BNE (funct3 == 001): branch se x[rs1] != x[rs2]
         if ((funct3 == 3'b000 && read_data1 == read_data2) ||
             (funct3 == 3'b001 && read_data1 != read_data2)) begin
           PCWrite = 1'b1;
@@ -284,21 +287,15 @@ module core(
                       (MemToReg == 1'b1)     ? mem_data_reg : alu_result_reg;
 
     // Geração dos sinais de endereço e escrita para a memória.
-    // Para instruções store (opcode 0100011), se for SB ou SH,
-    // realizamos um "read-modify-write" utilizando data_in (conteúdo atual da memória)
-    // para atualizar apenas os byte(s) desejados baseado em address[1:0].
     address_reg = (AdrSrc == 1'b1) ? alu_result_reg : pc;
     we_reg = MemWrite;
     if (opcode == 7'b0100011) begin // STORE
       case (funct3)
-        3'b000: // SB: atualiza 8 bits na posição determinada pelo offset (address[1:0])
-          data_out_reg = (data_in & ~(32'hFF << (address[1:0]*8))) |
-                         ((read_data2[7:0] & 8'hFF) << (address[1:0]*8));
-        3'b001: // SH: atualiza 16 bits (halfword) – offset deve ser 0 ou 2
-          data_out_reg = (data_in & ~(32'hFFFF << (address[1:0]*8))) |
-                         ((read_data2[15:0] & 16'hFFFF) << (address[1:0]*8));
-        default: // SW: store word
-          data_out_reg = read_data2;
+        3'b000: data_out_reg = (data_in & ~(32'hFF << (address[1:0]*8))) |
+                               ((read_data2[7:0] & 8'hFF) << (address[1:0]*8));
+        3'b001: data_out_reg = (data_in & ~(32'hFFFF << (address[1:0]*8))) |
+                               ((read_data2[15:0] & 16'hFFFF) << (address[1:0]*8));
+        default: data_out_reg = read_data2;
       endcase
     end else begin
       data_out_reg = read_data2;
